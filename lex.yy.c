@@ -481,10 +481,9 @@ char *yytext;
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
 int line = 1;
+#line 486 "lex.yy.c"
 #line 487 "lex.yy.c"
-#line 488 "lex.yy.c"
 
 #define INITIAL 0
 
@@ -701,10 +700,9 @@ YY_DECL
 		}
 
 	{
-#line 15 "Lex.l"
+#line 14 "Lex.l"
 
-
-#line 708 "lex.yy.c"
+#line 706 "lex.yy.c"
 
 	while ( /*CONSTCOND*/1 )		/* loops until end-of-file is reached */
 		{
@@ -763,166 +761,166 @@ do_action:	/* This label is used only to access EOF actions. */
 
 case 1:
 YY_RULE_SETUP
-#line 17 "Lex.l"
-{ printf("INT_KEYWORD\n"); }
+#line 15 "Lex.l"
+{ printf("Int keyword\n"); }
 	YY_BREAK
 case 2:
 YY_RULE_SETUP
-#line 18 "Lex.l"
-{ printf("FLOAT_KEYWORD\n"); }
+#line 16 "Lex.l"
+{ printf("Float keyword\n"); }
 	YY_BREAK
 case 3:
 YY_RULE_SETUP
-#line 19 "Lex.l"
-{ printf("IF\n"); }
+#line 17 "Lex.l"
+{ printf("If\n"); }
 	YY_BREAK
 case 4:
 YY_RULE_SETUP
-#line 20 "Lex.l"
-{ printf("ELSE\n"); }
+#line 18 "Lex.l"
+{ printf("Else\n"); }
 	YY_BREAK
 case 5:
 YY_RULE_SETUP
-#line 21 "Lex.l"
-{ printf("WHILE\n"); }
+#line 19 "Lex.l"
+{ printf("While Statement\n"); }
 	YY_BREAK
 case 6:
 YY_RULE_SETUP
-#line 22 "Lex.l"
-{ printf("PRINT\n"); }
+#line 20 "Lex.l"
+{ printf("Print Statement\n"); }
 	YY_BREAK
 case 7:
 YY_RULE_SETUP
-#line 24 "Lex.l"
-{ printf("AND\n"); }
+#line 22 "Lex.l"
+{ printf("And\n"); }
 	YY_BREAK
 case 8:
 YY_RULE_SETUP
-#line 25 "Lex.l"
-{ printf("OR\n"); }
+#line 23 "Lex.l"
+{ printf("Or\n"); }
 	YY_BREAK
 case 9:
 YY_RULE_SETUP
-#line 26 "Lex.l"
-{ printf("NOT\n"); }
+#line 24 "Lex.l"
+{ printf("Not\n"); }
 	YY_BREAK
 case 10:
 YY_RULE_SETUP
-#line 28 "Lex.l"
-{ printf("LE\n"); }
+#line 26 "Lex.l"
+{ printf("Less Than Equal\n"); }
 	YY_BREAK
 case 11:
 YY_RULE_SETUP
-#line 29 "Lex.l"
-{ printf("GE\n"); }
+#line 27 "Lex.l"
+{ printf("Greater Than Equal\n"); }
 	YY_BREAK
 case 12:
 YY_RULE_SETUP
-#line 30 "Lex.l"
-{ printf("EQ\n"); }
+#line 28 "Lex.l"
+{ printf("Equal\n"); }
 	YY_BREAK
 case 13:
 YY_RULE_SETUP
-#line 31 "Lex.l"
-{ printf("NE\n"); }
+#line 29 "Lex.l"
+{ printf("Not Equal\n"); }
 	YY_BREAK
 case 14:
 YY_RULE_SETUP
-#line 32 "Lex.l"
-{ printf("LT\n"); }
+#line 30 "Lex.l"
+{ printf("Less Than\n"); }
 	YY_BREAK
 case 15:
 YY_RULE_SETUP
-#line 33 "Lex.l"
-{ printf("GT\n"); }
+#line 31 "Lex.l"
+{ printf("Greater Than\n"); }
 	YY_BREAK
 case 16:
 YY_RULE_SETUP
-#line 35 "Lex.l"
-{ printf("PLUS\n"); }
+#line 33 "Lex.l"
+{ printf("Plus\n"); }
 	YY_BREAK
 case 17:
 YY_RULE_SETUP
-#line 36 "Lex.l"
-{ printf("MINUS\n"); }
+#line 34 "Lex.l"
+{ printf("Minus\n"); }
 	YY_BREAK
 case 18:
 YY_RULE_SETUP
-#line 37 "Lex.l"
-{ printf("MUL\n"); }
+#line 35 "Lex.l"
+{ printf("Multiply"); }
 	YY_BREAK
 case 19:
 YY_RULE_SETUP
-#line 38 "Lex.l"
-{ printf("DIV\n"); }
+#line 36 "Lex.l"
+{ printf("Divide\n"); }
 	YY_BREAK
 case 20:
 YY_RULE_SETUP
-#line 39 "Lex.l"
-{ printf("MOD\n"); }
+#line 37 "Lex.l"
+{ printf("Mod\n"); }
 	YY_BREAK
 case 21:
 YY_RULE_SETUP
-#line 41 "Lex.l"
-{ printf("SEMICOLON\n"); }
+#line 39 "Lex.l"
+{ printf("Semicolon\n"); }
 	YY_BREAK
 case 22:
 YY_RULE_SETUP
-#line 42 "Lex.l"
-{ printf("LBRACE\n"); }
+#line 40 "Lex.l"
+{ printf("Left Brace\n"); }
 	YY_BREAK
 case 23:
 YY_RULE_SETUP
-#line 43 "Lex.l"
-{ printf("RBRACE\n"); }
+#line 41 "Lex.l"
+{ printf("Right Brace\n"); }
 	YY_BREAK
 case 24:
 YY_RULE_SETUP
-#line 44 "Lex.l"
-{ printf("LPAREN\n"); }
+#line 42 "Lex.l"
+{ printf("Left Paren\n"); }
 	YY_BREAK
 case 25:
 YY_RULE_SETUP
-#line 45 "Lex.l"
-{ printf("RPAREN\n"); }
+#line 43 "Lex.l"
+{ printf("Right Paren\n"); }
 	YY_BREAK
 case 26:
 YY_RULE_SETUP
-#line 47 "Lex.l"
-{ printf("FLOAT_LITERAL(%s)\n", yytext); }
+#line 45 "Lex.l"
+{ printf("Float Literal(%s)\n", yytext); }
 	YY_BREAK
 case 27:
 YY_RULE_SETUP
-#line 48 "Lex.l"
-{ printf("INT_LITERAL(%s)\n", yytext); }
+#line 46 "Lex.l"
+{ printf("Int Literal(%s)\n", yytext); }
 	YY_BREAK
 case 28:
 YY_RULE_SETUP
-#line 49 "Lex.l"
-{ printf("IDENTIFIER(%s)\n", yytext); }
+#line 47 "Lex.l"
+{ printf("Identifier(%s)\n", yytext); }
 	YY_BREAK
 case 29:
 YY_RULE_SETUP
-#line 51 "Lex.l"
+#line 49 "Lex.l"
 { /* ignore whitespace */ }
 	YY_BREAK
 case 30:
 /* rule 30 can match eol */
 YY_RULE_SETUP
-#line 52 "Lex.l"
+#line 50 "Lex.l"
 { line++; }
 	YY_BREAK
 case 31:
 YY_RULE_SETUP
-#line 54 "Lex.l"
-{ printf("LEXICAL ERROR at line %d: %s\n", line, yytext); }
+#line 52 "Lex.l"
+{ printf("Lexical error at line %d: %s\n", line, yytext); }
 	YY_BREAK
 case 32:
 YY_RULE_SETUP
-#line 56 "Lex.l"
+#line 53 "Lex.l"
 ECHO;
 	YY_BREAK
-#line 926 "lex.yy.c"
+#line 924 "lex.yy.c"
 case YY_STATE_EOF(INITIAL):
 	yyterminate();
 
@@ -1927,7 +1925,7 @@ void yyfree (void * ptr )
 
 #define YYTABLES_NAME "yytables"
 
-#line 56 "Lex.l"
+#line 53 "Lex.l"
 
 
 int main() {
