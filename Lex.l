@@ -2,51 +2,49 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
 int line = 1;
 %}
 
-DIGIT      [0-9]
-LETTER     [a-zA-Z_]
-ID         {LETTER}({LETTER}|{DIGIT})*
-INTNUM     {DIGIT}+
-FLOATNUM   {DIGIT}+"."{DIGIT}+
+Digit [0-9]
+Letter [a-zA-Z_]
+ID {LETTER}({LETTER}|{DIGIT})*
+Int_num {DIGIT}+
+Float_num {DIGIT}+"."{DIGIT}+
 
 %%
+"int"           { printf("Int keyword\n"); }
+"float"         { printf("Float keyword\n"); }
+"if"            { printf("If\n"); }
+"else"          { printf("Else\n"); }
+"while"         { printf("While Statement\n"); }
+"print"         { printf("Print Statement\n"); }
 
-"int"           { printf("INT_KEYWORD\n"); }
-"float"         { printf("FLOAT_KEYWORD\n"); }
-"if"            { printf("IF\n"); }
-"else"          { printf("ELSE\n"); }
-"while"         { printf("WHILE\n"); }
-"print"         { printf("PRINT\n"); }
+"&&"            { printf("And\n"); }
+"||"            { printf("Or\n"); }
+"!"             { printf("Not\n"); }
 
-"&&"            { printf("AND\n"); }
-"||"            { printf("OR\n"); }
-"!"             { printf("NOT\n"); }
+"<="            { printf("Less Than Equal\n"); }
+">="            { printf("Greater Than Equal\n"); }
+"=="            { printf("Equal\n"); }
+"!="            { printf("Not Equal\n"); }
+"<"             { printf("Less Than\n"); }
+">"             { printf("Greater Than\n"); }
 
-"<="            { printf("LE\n"); }
-">="            { printf("GE\n"); }
-"=="            { printf("EQ\n"); }
-"!="            { printf("NE\n"); }
-"<"             { printf("LT\n"); }
-">"             { printf("GT\n"); }
+"+"             { printf("Plus\n"); }
+"-"             { printf("Minus\n"); }
+"*"             { printf("Multiply"); }
+"/"             { printf("Divide\n"); }
+"%"             { printf("Mod\n"); }
 
-"+"             { printf("PLUS\n"); }
-"-"             { printf("MINUS\n"); }
-"*"             { printf("MUL\n"); }
-"/"             { printf("DIV\n"); }
-"%"             { printf("MOD\n"); }
+";"             { printf("Semicolon\n"); }
+"{"             { printf("Left Brace\n"); }
+"}"             { printf("Right Brace\n"); }
+"("             { printf("Left Paren\n"); }
+")"             { printf("Right Paren\n"); }
 
-";"             { printf("SEMICOLON\n"); }
-"{"             { printf("LBRACE\n"); }
-"}"             { printf("RBRACE\n"); }
-"("             { printf("LPAREN\n"); }
-")"             { printf("RPAREN\n"); }
-
-{FLOATNUM}      { printf("FLOAT_LITERAL(%s)\n", yytext); }
-{INTNUM}        { printf("INT_LITERAL(%s)\n", yytext); }
-{ID}            { printf("IDENTIFIER(%s)\n", yytext); }
+{Float_num}      { printf("Float Literal(%s)\n", yytext); }
+{Int_num}        { printf("Int Literal(%s)\n", yytext); }
+{ID}            { printf("Identifier(%s)\n", yytext); }
 
 [ \t]+          { /* ignore whitespace */ }
 \n              { line++; }
