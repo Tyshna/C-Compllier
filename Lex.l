@@ -30,6 +30,7 @@ Float_num {Digit}+"."{Digit}+
 "<" { printf("Less Than\n"); }
 ">" { printf("Greater Than\n"); }
 
+"=" { printf("Assignment\n"); }
 "+" { printf("Plus\n"); }
 "-" { printf("Minus\n"); }
 "*" { printf("Multiply"); }
