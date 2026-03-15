@@ -351,8 +351,8 @@ static void yynoreturn yy_fatal_error ( const char* msg  );
 	(yy_hold_char) = *yy_cp; \
 	*yy_cp = '\0'; \
 	(yy_c_buf_p) = yy_cp;
-#define YY_NUM_RULES 32
-#define YY_END_OF_BUFFER 33
+#define YY_NUM_RULES 33
+#define YY_END_OF_BUFFER 34
 /* This struct is not used in this scanner,
    but its presence is necessary. */
 struct yy_trans_info
@@ -362,12 +362,12 @@ struct yy_trans_info
 	};
 static const flex_int16_t yy_accept[60] =
     {   0,
-        0,    0,   33,   31,   29,   30,    9,   20,   31,   24,
-       25,   18,   16,   17,   19,   27,   21,   14,   31,   15,
-       28,   28,   28,   28,   28,   28,   22,   31,   23,   29,
-       13,    7,    0,   27,   10,   12,   11,   28,   28,   28,
-        3,   28,   28,   28,    8,   26,   28,   28,    1,   28,
-       28,    4,   28,   28,   28,    2,    6,    5,    0
+        0,    0,   34,   32,   30,   31,    9,   21,   32,   25,
+       26,   19,   17,   18,   20,   28,   22,   14,   16,   15,
+       29,   29,   29,   29,   29,   29,   23,   32,   24,   30,
+       13,    7,    0,   28,   10,   12,   11,   29,   29,   29,
+        3,   29,   29,   29,    8,   27,   29,   29,    1,   29,
+       29,    4,   29,   29,   29,    2,    6,    5,    0
     } ;
 
 static const YY_CHAR yy_ec[256] =
@@ -837,90 +837,95 @@ YY_RULE_SETUP
 case 16:
 YY_RULE_SETUP
 #line 33 "Lex.l"
-{ printf("Plus\n"); }
+{ printf("Assignment\n"); }
 	YY_BREAK
 case 17:
 YY_RULE_SETUP
 #line 34 "Lex.l"
-{ printf("Minus\n"); }
+{ printf("Plus\n"); }
 	YY_BREAK
 case 18:
 YY_RULE_SETUP
 #line 35 "Lex.l"
-{ printf("Multiply"); }
+{ printf("Minus\n"); }
 	YY_BREAK
 case 19:
 YY_RULE_SETUP
 #line 36 "Lex.l"
-{ printf("Divide\n"); }
+{ printf("Multiply"); }
 	YY_BREAK
 case 20:
 YY_RULE_SETUP
 #line 37 "Lex.l"
-{ printf("Mod\n"); }
+{ printf("Divide\n"); }
 	YY_BREAK
 case 21:
+YY_RULE_SETUP
+#line 38 "Lex.l"
+{ printf("Mod\n"); }
+	YY_BREAK
+case 22:
 YY_RULE_SETUP
 #line 39 "Lex.l"
 { printf("Semicolon\n"); }
 	YY_BREAK
-case 22:
+case 23:
 YY_RULE_SETUP
 #line 40 "Lex.l"
 { printf("Left Brace\n"); }
 	YY_BREAK
-case 23:
+case 24:
 YY_RULE_SETUP
 #line 41 "Lex.l"
 { printf("Right Brace\n"); }
 	YY_BREAK
-case 24:
+case 25:
 YY_RULE_SETUP
 #line 42 "Lex.l"
 { printf("Left Paren\n"); }
 	YY_BREAK
-case 25:
+case 26:
 YY_RULE_SETUP
 #line 43 "Lex.l"
 { printf("Right Paren\n"); }
 	YY_BREAK
-case 26:
+case 27:
 YY_RULE_SETUP
 #line 45 "Lex.l"
 { printf("Float Literal(%s)\n", yytext); }
 	YY_BREAK
-case 27:
+case 28:
 YY_RULE_SETUP
 #line 46 "Lex.l"
 { printf("Int Literal(%s)\n", yytext); }
 	YY_BREAK
-case 28:
+case 29:
 YY_RULE_SETUP
 #line 47 "Lex.l"
 { printf("Identifier(%s)\n", yytext); }
 	YY_BREAK
-case 29:
+case 30:
 YY_RULE_SETUP
 #line 49 "Lex.l"
 { /* ignore whitespace */ }
 	YY_BREAK
-case 30:
-/* rule 30 can match eol */
+case 31:
+/* rule 31 can match eol */
 YY_RULE_SETUP
 #line 50 "Lex.l"
 { line++; }
 	YY_BREAK
-case 31:
+case 32:
 YY_RULE_SETUP
 #line 52 "Lex.l"
 { printf("Lexical error at line %d: %s\n", line, yytext); }
 	YY_BREAK
-case 32:
+case 33:
 YY_RULE_SETUP
 #line 53 "Lex.l"
 ECHO;
 	YY_BREAK
-#line 924 "lex.yy.c"
+#line 929 "lex.yy.c"
 case YY_STATE_EOF(INITIAL):
 	yyterminate();
 
