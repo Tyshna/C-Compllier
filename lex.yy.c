@@ -381,7 +381,7 @@ static const YY_CHAR yy_ec[256] =
        17,   18,    1,    1,   19,   19,   19,   19,   19,   19,
        19,   19,   19,   19,   19,   19,   19,   19,   19,   19,
        19,   19,   19,   19,   19,   19,   19,   19,   19,   19,
-        1,    1,    1,    1,   19,    1,   20,   19,   19,   19,
+        1,    1,    1,    1,    1,    1,   20,   19,   19,   19,
 
        21,   22,   19,   23,   24,   19,   19,   25,   19,   26,
        27,   28,   19,   29,   30,   31,   19,   19,   32,   19,
@@ -852,7 +852,7 @@ YY_RULE_SETUP
 case 19:
 YY_RULE_SETUP
 #line 36 "Lex.l"
-{ printf("Multiply"); }
+{ printf("Multiply\n"); }
 	YY_BREAK
 case 20:
 YY_RULE_SETUP
@@ -866,63 +866,63 @@ YY_RULE_SETUP
 	YY_BREAK
 case 22:
 YY_RULE_SETUP
-#line 39 "Lex.l"
+#line 40 "Lex.l"
 { printf("Semicolon\n"); }
 	YY_BREAK
 case 23:
 YY_RULE_SETUP
-#line 40 "Lex.l"
+#line 41 "Lex.l"
 { printf("Left Brace\n"); }
 	YY_BREAK
 case 24:
 YY_RULE_SETUP
-#line 41 "Lex.l"
+#line 42 "Lex.l"
 { printf("Right Brace\n"); }
 	YY_BREAK
 case 25:
 YY_RULE_SETUP
-#line 42 "Lex.l"
+#line 43 "Lex.l"
 { printf("Left Paren\n"); }
 	YY_BREAK
 case 26:
 YY_RULE_SETUP
-#line 43 "Lex.l"
+#line 44 "Lex.l"
 { printf("Right Paren\n"); }
 	YY_BREAK
 case 27:
 YY_RULE_SETUP
-#line 45 "Lex.l"
+#line 46 "Lex.l"
 { printf("Float Literal(%s)\n", yytext); }
 	YY_BREAK
 case 28:
 YY_RULE_SETUP
-#line 46 "Lex.l"
+#line 47 "Lex.l"
 { printf("Int Literal(%s)\n", yytext); }
 	YY_BREAK
 case 29:
 YY_RULE_SETUP
-#line 47 "Lex.l"
+#line 49 "Lex.l"
 { printf("Identifier(%s)\n", yytext); }
 	YY_BREAK
 case 30:
 YY_RULE_SETUP
-#line 49 "Lex.l"
+#line 51 "Lex.l"
 { /* ignore whitespace */ }
 	YY_BREAK
 case 31:
 /* rule 31 can match eol */
 YY_RULE_SETUP
-#line 50 "Lex.l"
+#line 52 "Lex.l"
 { line++; }
 	YY_BREAK
 case 32:
 YY_RULE_SETUP
-#line 52 "Lex.l"
+#line 54 "Lex.l"
 { printf("Lexical error at line %d: %s\n", line, yytext); }
 	YY_BREAK
 case 33:
 YY_RULE_SETUP
-#line 53 "Lex.l"
+#line 55 "Lex.l"
 ECHO;
 	YY_BREAK
 #line 929 "lex.yy.c"
@@ -1930,10 +1930,10 @@ void yyfree (void * ptr )
 
 #define YYTABLES_NAME "yytables"
 
-#line 53 "Lex.l"
+#line 55 "Lex.l"
 
 
 int main() {
     yylex();
     return 0;
-}   
+}

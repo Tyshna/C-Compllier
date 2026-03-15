@@ -1,2 +1,4 @@
-printf("Hello World");
 int a = 70;
+int b = 40;
+sum = a+b;
+print (sum)
