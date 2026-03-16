@@ -11,6 +11,14 @@ void yyerror(const char *s);
 %token AND OR NOT
 %token LE GE EQ NE LT GT
 
+%left OR
+%left AND
+%right NOT
+%left EQ NE
+%left LT GT LE GE
+%left '+' '-'
+%left '*' '/' '%'
+
 %%
 program
     : stmt_list
