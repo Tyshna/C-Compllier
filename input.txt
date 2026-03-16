@@ -1,4 +1,4 @@
 int a = 70;
-int b = 40;
-sum = a+b;
-print (sum)
+int b = 4;
+int sum = a+b; 
+print(sum);
