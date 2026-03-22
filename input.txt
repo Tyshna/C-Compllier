@@ -1,3 +1,8 @@
-int a = 70;
-int b = 4;
-int sum = a+b;
+
+ {   int a=7;
+    int b=8; int sum = 0;
+      
+    sum = a + b
+
+    print(sum);
+}

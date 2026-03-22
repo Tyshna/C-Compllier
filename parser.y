@@ -7,7 +7,8 @@ extern int line;
 int yylex();
 void yyerror(const char *s);
 
-/* 1. Node Structure */
+int error_count = 0;
+
 typedef struct node {
     char *token;
     struct node *left;
@@ -33,7 +34,6 @@ node *final_root = NULL;
 %token AND OR NOT
 %token LE GE EQ NE LT GT
 
-/* Non-terminal types */
 %type <nval> program stmt_list stmt declaration type assignment print_stmt block if_stmt while_stmt expr term factor bool_expr relop
 
 %left OR
@@ -54,6 +54,22 @@ stmt_list:
     | stmt         { $$ = $1; }
     ;
 
+/*
+ * Q3: Error Recovery Rules
+ * ─────────────────────────────────────────────────────────────────────────
+ * The special 'error' token lets yacc skip bad tokens until it can
+ * resynchronise.  We add one error rule per statement-level context so
+ * the parser always recovers at a ';' or '}' and continues to report
+ * ALL remaining errors rather than stopping at the first one.
+ *
+ * How it works:
+ *   1. yyerror() is called → error_count++ and the line is printed.
+ *   2. yacc enters error-recovery mode and discards tokens until it
+ *      finds the synchronisation token listed after 'error'  (';' / '}').
+ *   3. Parsing resumes from the next statement.
+ *   4. yyerrok resets the error flag so future errors are reported fresh.
+ */
+
 stmt:
     declaration    { $$ = $1; }
     | assignment   { $$ = $1; }
@@ -61,6 +77,8 @@ stmt:
     | while_stmt   { $$ = $1; }
     | print_stmt   { $$ = $1; }
     | block        { $$ = $1; }
+    | error ';'    { $$ = mknode("ERROR_STMT", NULL, NULL, NULL); yyerrok; }
+    | error '}'    { $$ = mknode("ERROR_BLOCK", NULL, NULL, NULL); yyerrok; }
     ;
 
 declaration:
@@ -71,6 +89,10 @@ declaration:
     | type ID '=' expr ';' { 
         printf("Line %d: Syntactic Validation [Decl & Assign: %s]\n", line, $2);
         $$ = mknode("Decl=", $1, mknode($2, NULL, NULL, NULL), $4); 
+    }
+    | type error ';' {
+        $$ = mknode("ERROR_DECL", $1, NULL, NULL);
+        yyerrok;
     }
     ;
 
@@ -84,6 +106,10 @@ assignment:
         printf("Line %d: Syntactic Validation [Assignment to %s]\n", line, $1);
         $$ = mknode("=", mknode($1, NULL, NULL, NULL), $3, NULL); 
     }
+    | ID '=' error ';' {
+        $$ = mknode("ERROR_ASSIGN", mknode($1, NULL, NULL, NULL), NULL, NULL);
+        yyerrok;
+    }
     ;
 
 print_stmt:
@@ -91,10 +117,22 @@ print_stmt:
         printf("Line %d: Syntactic Validation [Print Statement]\n", line);
         $$ = mknode("PRINT", $3, NULL, NULL); 
     }
+    | PRINT '(' error ')' ';' {
+        $$ = mknode("ERROR_PRINT", NULL, NULL, NULL);
+        yyerrok;
+    }
+    | PRINT error ';' {
+        $$ = mknode("ERROR_PRINT", NULL, NULL, NULL);
+        yyerrok;
+    }
     ;
 
 block:
     '{' stmt_list '}' { $$ = $2; }
+    | '{' error '}' {
+        $$ = mknode("ERROR_BLOCK", NULL, NULL, NULL);
+        yyerrok;
+    }
     ;
 
 if_stmt:
@@ -106,12 +144,28 @@ if_stmt:
         printf("Line %d: Syntactic Validation [If-Else Block]\n", line);
         $$ = mknode("IF-ELSE", $3, $5, $7); 
     }
+    | IF '(' error ')' stmt {
+        $$ = mknode("ERROR_IF", NULL, $5, NULL);
+        yyerrok;
+    }
+    | IF error stmt {
+        $$ = mknode("ERROR_IF", NULL, $3, NULL);
+        yyerrok;
+    }
     ;
 
 while_stmt:
     WHILE '(' bool_expr ')' stmt { 
         printf("Line %d: Syntactic Validation [While Loop]\n", line);
         $$ = mknode("WHILE", $3, $5, NULL); 
+    }
+    | WHILE '(' error ')' stmt {
+        $$ = mknode("ERROR_WHILE", NULL, $5, NULL);
+        yyerrok;
+    }
+    | WHILE error stmt {
+        $$ = mknode("ERROR_WHILE", NULL, $3, NULL);
+        yyerrok;
     }
     ;
 
@@ -152,8 +206,6 @@ relop:
     | NE { $$ = mknode("!=", NULL, NULL, NULL); }
     ;
 %%
-
-/* --- Helper Functions --- */
 
 node* mknode(char* token, node* left, node* mid, node* right) {
     node* newnode = (node*)malloc(sizeof(node));
@@ -196,8 +248,10 @@ void printRMD(node* root) {
 
 int main() {
     printf("--- PARSING STARTED ---\n\n");
-    if (yyparse() == 0) {
-        printf("\nRESULT: Success.\n");
+    yyparse();
+
+    if (error_count == 0) {
+        printf("\nRESULT: Parsing successful — no syntax errors detected.\n");
         printf("\n>>> GRAPHICAL SYNTAX TREE:\n\n");
         printGraphicalTree(final_root, "", 1);
 
@@ -207,12 +261,13 @@ int main() {
         printRMD(final_root);
         printf("\n");
     } else {
-        printf("\nRESULT: Failed.\n");
+        printf("\nRESULT: Parsing completed with %d syntax error(s) — see errors above.\n", error_count);
     }
-    return 0;
+    return (error_count > 0) ? 1 : 0;
 }
 
 void yyerror(const char *s) {
     extern int line;
+    error_count++;
     fprintf(stderr, "Syntax error at line %d: %s\n", line, s);
 }
