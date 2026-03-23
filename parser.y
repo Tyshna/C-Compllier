@@ -54,22 +54,6 @@ stmt_list:
     | stmt         { $$ = $1; }
     ;
 
-/*
- * Q3: Error Recovery Rules
- * ─────────────────────────────────────────────────────────────────────────
- * The special 'error' token lets yacc skip bad tokens until it can
- * resynchronise.  We add one error rule per statement-level context so
- * the parser always recovers at a ';' or '}' and continues to report
- * ALL remaining errors rather than stopping at the first one.
- *
- * How it works:
- *   1. yyerror() is called → error_count++ and the line is printed.
- *   2. yacc enters error-recovery mode and discards tokens until it
- *      finds the synchronisation token listed after 'error'  (';' / '}').
- *   3. Parsing resumes from the next statement.
- *   4. yyerrok resets the error flag so future errors are reported fresh.
- */
-
 stmt:
     declaration    { $$ = $1; }
     | assignment   { $$ = $1; }
@@ -77,51 +61,75 @@ stmt:
     | while_stmt   { $$ = $1; }
     | print_stmt   { $$ = $1; }
     | block        { $$ = $1; }
-    | error ';'    { $$ = mknode("ERROR_STMT", NULL, NULL, NULL); yyerrok; }
-    | error '}'    { $$ = mknode("ERROR_BLOCK", NULL, NULL, NULL); yyerrok; }
+
+        | error ';' {
+        fprintf(stderr, "Reason : Ill-formed statement — possibly missing ';', ')'\n\n");
+        $$ = mknode("ERROR_STMT", NULL, NULL, NULL);
+        yyerrok;
+    }
+
+    | error '}' {
+        fprintf(stderr, "Reason : Ill-formed block — possibly missing '{' or extra '}'\n");
+        $$ = mknode("ERROR_BLOCK", NULL, NULL, NULL);
+        yyerrok;
+    }
     ;
 
 declaration:
-    type ID ';' { 
+    type ID ';' {
         printf("Line %d: Syntactic Validation [Declaration: %s]\n", line, $2);
-        $$ = mknode("Decl", $1, mknode($2, NULL, NULL, NULL), NULL); 
+        $$ = mknode("Decl", $1, mknode($2, NULL, NULL, NULL), NULL);
     }
-    | type ID '=' expr ';' { 
+    | type ID '=' expr ';' {
         printf("Line %d: Syntactic Validation [Decl & Assign: %s]\n", line, $2);
-        $$ = mknode("Decl=", $1, mknode($2, NULL, NULL, NULL), $4); 
+        $$ = mknode("Decl=", $1, mknode($2, NULL, NULL, NULL), $4);
     }
+
     | type error ';' {
+        fprintf(stderr, "Reason : Invalid declaration — expected a variable name after type, got an invalid token\n");
         $$ = mknode("ERROR_DECL", $1, NULL, NULL);
         yyerrok;
     }
     ;
 
 type:
-    INT   { $$ = mknode("int", NULL, NULL, NULL); }
+    INT   { $$ = mknode("int",   NULL, NULL, NULL); }
     | FLOAT { $$ = mknode("float", NULL, NULL, NULL); }
     ;
 
 assignment:
-    ID '=' expr ';' { 
+    ID '=' expr ';' {
         printf("Line %d: Syntactic Validation [Assignment to %s]\n", line, $1);
-        $$ = mknode("=", mknode($1, NULL, NULL, NULL), $3, NULL); 
+        $$ = mknode("=", mknode($1, NULL, NULL, NULL), $3, NULL);
     }
+
     | ID '=' error ';' {
+        fprintf(stderr, "Reason : Invalid assignment — ill-formed or missing expression\n");
+        $$ = mknode("ERROR_ASSIGN", mknode($1, NULL, NULL, NULL), NULL, NULL);
+        yyerrok;
+    }
+
+    | ID error ';' {
+        fprintf(stderr, "Reason : Invalid assignment — missing '=' after variable name '%s'\n", $1);
         $$ = mknode("ERROR_ASSIGN", mknode($1, NULL, NULL, NULL), NULL, NULL);
         yyerrok;
     }
     ;
 
 print_stmt:
-    PRINT '(' expr ')' ';' { 
+    PRINT '(' expr ')' ';' {
         printf("Line %d: Syntactic Validation [Print Statement]\n", line);
-        $$ = mknode("PRINT", $3, NULL, NULL); 
+        $$ = mknode("PRINT", $3, NULL, NULL);
     }
+
     | PRINT '(' error ')' ';' {
+        fprintf(stderr, "Reason : Invalid print statement — ill-formed expression\n");
         $$ = mknode("ERROR_PRINT", NULL, NULL, NULL);
         yyerrok;
     }
+
     | PRINT error ';' {
+        fprintf(stderr, "Reason : Invalid print statement — missing '(' and/or ')' around the argument\n");
         $$ = mknode("ERROR_PRINT", NULL, NULL, NULL);
         yyerrok;
     }
@@ -129,41 +137,52 @@ print_stmt:
 
 block:
     '{' stmt_list '}' { $$ = $2; }
+
     | '{' error '}' {
+        fprintf(stderr, "Reason : Ill-formed block body\n");
         $$ = mknode("ERROR_BLOCK", NULL, NULL, NULL);
         yyerrok;
     }
     ;
 
 if_stmt:
-    IF '(' bool_expr ')' stmt { 
+    IF '(' bool_expr ')' stmt {
         printf("Line %d: Syntactic Validation [If Block]\n", line);
-        $$ = mknode("IF", $3, $5, NULL); 
+        $$ = mknode("IF", $3, $5, NULL);
     }
-    | IF '(' bool_expr ')' stmt ELSE stmt { 
+    | IF '(' bool_expr ')' stmt ELSE stmt {
         printf("Line %d: Syntactic Validation [If-Else Block]\n", line);
-        $$ = mknode("IF-ELSE", $3, $5, $7); 
+        $$ = mknode("IF-ELSE", $3, $5, $7);
     }
+
     | IF '(' error ')' stmt {
+        fprintf(stderr, "Reason : Invalid if-statement — ill-formed condition\n");
         $$ = mknode("ERROR_IF", NULL, $5, NULL);
         yyerrok;
     }
+
     | IF error stmt {
+        fprintf(stderr, "Reason : Invalid if-statement — missing '(' and/or ')' around condition\n");
         $$ = mknode("ERROR_IF", NULL, $3, NULL);
         yyerrok;
     }
     ;
 
 while_stmt:
-    WHILE '(' bool_expr ')' stmt { 
+    WHILE '(' bool_expr ')' stmt {
         printf("Line %d: Syntactic Validation [While Loop]\n", line);
-        $$ = mknode("WHILE", $3, $5, NULL); 
+        $$ = mknode("WHILE", $3, $5, NULL);
     }
+
+    /* e.g.  while (x + ) { }  — bad condition expression */
     | WHILE '(' error ')' stmt {
+        fprintf(stderr, "Reason : Invalid while-loop - ill-formed condition\n");
         $$ = mknode("ERROR_WHILE", NULL, $5, NULL);
         yyerrok;
     }
+
     | WHILE error stmt {
+        fprintf(stderr, "Reason : Invalid while-loop — missing '(' and/or ')' around condition\n");
         $$ = mknode("ERROR_WHILE", NULL, $3, NULL);
         yyerrok;
     }
@@ -176,9 +195,9 @@ expr:
     ;
 
 term:
-    term '*' factor { $$ = mknode("*", $1, $3, NULL); }
-    | term '/' factor { $$ = mknode("/", $1, $3, NULL); }
-    | term '%' factor { $$ = mknode("%", $1, $3, NULL); }
+    term '*' factor { $$ = mknode("*",  $1, $3, NULL); }
+    | term '/' factor { $$ = mknode("/",  $1, $3, NULL); }
+    | term '%' factor { $$ = mknode("%",  $1, $3, NULL); }
     | factor { $$ = $1; }
     ;
 
@@ -192,14 +211,14 @@ factor:
 bool_expr:
     bool_expr AND bool_expr { $$ = mknode("&&", $1, $3, NULL); }
     | bool_expr OR bool_expr  { $$ = mknode("||", $1, $3, NULL); }
-    | NOT bool_expr           { $$ = mknode("!", $2, NULL, NULL); }
+    | NOT bool_expr           { $$ = mknode("!",  $2, NULL, NULL); }
     | expr relop expr         { $$ = mknode("RELOP", $1, $2, $3); }
     | '(' bool_expr ')'       { $$ = $2; }
     ;
 
 relop:
-    LT { $$ = mknode("<", NULL, NULL, NULL); }
-    | GT { $$ = mknode(">", NULL, NULL, NULL); }
+    LT { $$ = mknode("<",  NULL, NULL, NULL); }
+    | GT { $$ = mknode(">",  NULL, NULL, NULL); }
     | LE { $$ = mknode("<=", NULL, NULL, NULL); }
     | GE { $$ = mknode(">=", NULL, NULL, NULL); }
     | EQ { $$ = mknode("==", NULL, NULL, NULL); }
@@ -207,11 +226,12 @@ relop:
     ;
 %%
 
+
 node* mknode(char* token, node* left, node* mid, node* right) {
     node* newnode = (node*)malloc(sizeof(node));
     newnode->token = strdup(token);
-    newnode->left = left;
-    newnode->mid = mid;
+    newnode->left  = left;
+    newnode->mid   = mid;
     newnode->right = right;
     return newnode;
 }
@@ -221,13 +241,11 @@ void printGraphicalTree(node* root, char* prefix, int isLast) {
     printf("%s%s%s\n", prefix, (isLast ? "└── " : "├── "), root->token);
     char newPrefix[512];
     sprintf(newPrefix, "%s%s", prefix, (isLast ? "    " : "│   "));
-
     node *children[3] = {root->left, root->mid, root->right};
     int lastIdx = -1;
-    for(int i=0; i<3; i++) if(children[i]) lastIdx = i;
-    for(int i=0; i<=lastIdx; i++) {
-        if(children[i]) printGraphicalTree(children[i], newPrefix, i == lastIdx);
-    }
+    for (int i = 0; i < 3; i++) if (children[i]) lastIdx = i;
+    for (int i = 0; i <= lastIdx; i++)
+        if (children[i]) printGraphicalTree(children[i], newPrefix, i == lastIdx);
 }
 
 void printLMD(node* root) {
@@ -247,17 +265,16 @@ void printRMD(node* root) {
 }
 
 int main() {
-    printf("--- PARSING STARTED ---\n\n");
+    printf("PARSING STARTED\n\n");
     yyparse();
 
     if (error_count == 0) {
         printf("\nRESULT: Parsing successful — no syntax errors detected.\n");
-        printf("\n>>> GRAPHICAL SYNTAX TREE:\n\n");
+        printf("\nGRAPHICAL SYNTAX TREE:\n\n");
         printGraphicalTree(final_root, "", 1);
-
-        printf("\n>>> LEFTMOST DERIVATION:\n");
+        printf("\nLEFTMOST DERIVATION:\n");
         printLMD(final_root);
-        printf("\n\n>>> RIGHTMOST DERIVATION:\n");
+        printf("\n\nRIGHTMOST DERIVATION:\n");
         printRMD(final_root);
         printf("\n");
     } else {
@@ -268,6 +285,23 @@ int main() {
 
 void yyerror(const char *s) {
     extern int line;
+    extern char *yytext;
     error_count++;
-    fprintf(stderr, "Syntax error at line %d: %s\n", line, s);
+
+    if (strcmp(yytext, "") == 0 || strcmp(yytext, "$end") == 0)
+        fprintf(stderr, "Syntax error at line %d: Unexpected end of input — possibly missing ';' or '}'\n", line);
+    else if (strcmp(yytext, ";") == 0)
+        fprintf(stderr, "Syntax error at line %d: Unexpected ';' — ill-formed statement before semicolon\n", line);
+    else if (strcmp(yytext, ")") == 0)
+        fprintf(stderr, "Syntax error at line %d: Unexpected ')' — missing opening '(' or extra ')'\n", line);
+    else if (strcmp(yytext, "(") == 0)
+        fprintf(stderr, "Syntax error at line %d: Unexpected '(' — missing closing ')' from earlier, or missing ';' before this\n", line);
+    else if (strcmp(yytext, "}") == 0)
+        fprintf(stderr, "Syntax error at line %d: Unexpected '}' — missing opening '{' or extra '}' in block\n", line);
+    else if (strcmp(yytext, "{") == 0)
+        fprintf(stderr, "Syntax error at line %d: Unexpected '{' — missing closing '}' from a previous block, or ';' before this\n", line);
+    else if (strcmp(yytext, "=") == 0)
+        fprintf(stderr, "Syntax error at line %d: Unexpected '=' — missing variable name or invalid assignment target\n", line);
+    else
+        fprintf(stderr, "Syntax error at line %d: Unexpected token '%s'\n", line, yytext);
 }
