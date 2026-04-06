@@ -73,27 +73,378 @@
 #include <stdlib.h>
 #include <string.h>
 
-extern int line;
+extern int yylineno;
 int yylex();
 void yyerror(const char *s);
 
+typedef void* YY_BUFFER_STATE;
+extern YY_BUFFER_STATE yy_scan_string(const char *);
+extern void yy_delete_buffer(YY_BUFFER_STATE);
+
+#define MAX_STACK 100
+char stack_trace[MAX_STACK][50];
+int top = -1;
+
+char input_buffer[8192];
+int input_pos = 0;
+
 int error_count = 0;
 
+void push(const char *symbol) {
+    if (top >= MAX_STACK - 1) return;
+    strcpy(stack_trace[++top], symbol);
+}
+
+void pop_n(int n) {
+    if (top < n - 1) { top = -1; return; }
+    top -= n;
+}
+
+void print_stack() {
+    printf("$ ");
+    for (int i = 0; i <= top; i++)
+        printf("%s ", stack_trace[i]);
+}
+
+void print_input() {
+    for (int i = input_pos; input_buffer[i] != '\0'; i++)
+        printf("%c", input_buffer[i]);
+}
+
+void print_action(const char *action) {
+    printf("%-25s", "");
+    print_stack();
+    printf("\t");
+    print_input();
+    printf("\t%s\n", action);
+}
+
 typedef struct node {
-    char *token;
-    struct node *left;
-    struct node *mid;
-    struct node *right;
+    char* token;
+    struct node *left, *mid, *right;
 } node;
 
-node* mknode(char* token, node* left, node* mid, node* right);
-void printGraphicalTree(node* root, char* prefix, int isLast);
-void printLMD(node* root);
-void printRMD(node* root);
+node* mknode(char* token, node* left, node* mid, node* right) {
+    node* newnode = (node*)malloc(sizeof(node));
+    newnode->token = strdup(token);
+    newnode->left  = left;
+    newnode->mid   = mid;
+    newnode->right = right;
+    return newnode;
+}
 
-node *final_root = NULL;
+void printGraphicalTree(node* root, char* prefix, int isLast) {
+    if (root == NULL) return;
+    printf("%s%s%s\n", prefix, (isLast ? "└── " : "├── "), root->token);
+    char newPrefix[512];
+    sprintf(newPrefix, "%s%s", prefix, (isLast ? "    " : "│   "));
+    node *children[3] = {root->left, root->mid, root->right};
+    int lastIdx = -1;
+    for (int i = 0; i < 3; i++) if (children[i]) lastIdx = i;
+    for (int i = 0; i <= lastIdx; i++)
+        if (children[i]) printGraphicalTree(children[i], newPrefix, i == lastIdx);
+}
 
-#line 97 "y.tab.c"
+void printLMD(node* root) {
+    if (root == NULL) return;
+    printf("%s ", root->token);
+    printLMD(root->left);
+    printLMD(root->mid);
+    printLMD(root->right);
+}
+
+void printRMD(node* root) {
+    if (root == NULL) return;
+    printf("%s ", root->token);
+    printRMD(root->right);
+    printRMD(root->mid);
+    printRMD(root->left);
+}
+
+node* root;
+
+#define MAX_NT       15     
+#define MAX_T        40    
+#define MAX_RHS      10      
+#define MAX_PROD    50     
+#define SYM_LEN      20     
+
+#define NT_PROGRAM      0
+#define NT_STMT_LIST    1
+#define NT_STMT         2
+#define NT_TYPE         3
+#define NT_DECLARATION  4
+#define NT_ASSIGNMENT   5
+#define NT_IF_STMT      6
+#define NT_WHILE_STMT   7
+#define NT_PRINT_STMT   8
+#define NT_BLOCK        9
+#define NT_EXPR        10
+#define NT_TERM        11
+#define NT_FACTOR      12
+#define NT_BOOL_EXPR   13
+#define NT_RELOP       14
+
+static const char *nt_name[MAX_NT] = {
+    "program", "stmt_list", "stmt", "type", "declaration",
+    "assignment", "if_stmt", "while_stmt", "print_stmt", "block",
+    "expr", "term", "factor", "bool_expr", "relop"
+};
+
+typedef struct {
+    int  lhs;                       
+    char rhs[MAX_RHS][SYM_LEN];    
+    int  rhs_len;
+    int  has_eps;                
+} Production;
+
+static Production prods[MAX_PROD];
+static int        prod_count = 0;
+
+typedef struct {
+    char terms[MAX_T][SYM_LEN];
+    int  count;
+    int  has_eps;   
+} TermSet;
+
+static TermSet first_set[MAX_NT];
+static TermSet follow_set[MAX_NT];
+
+static void ts_add(TermSet *s, const char *t) {
+    for (int i = 0; i < s->count; i++)
+        if (strcmp(s->terms[i], t) == 0) return;
+    if (s->count < MAX_T)
+        strcpy(s->terms[s->count++], t);
+}
+
+static int ts_merge(TermSet *dst, const TermSet *src) {
+    int changed = 0;
+    for (int i = 0; i < src->count; i++) {
+        int found = 0;
+        for (int j = 0; j < dst->count; j++)
+            if (strcmp(dst->terms[j], src->terms[i]) == 0) { found = 1; break; }
+        if (!found && dst->count < MAX_T) {
+            strcpy(dst->terms[dst->count++], src->terms[i]);
+            changed = 1;
+        }
+    }
+    return changed;
+}
+
+static int is_nt(const char *sym) { return sym[0] == '#'; }
+static int nt_idx(const char *sym) { return atoi(sym + 1); }
+
+static Production *begin_prod(int lhs_idx) {
+    Production *p = &prods[prod_count++];
+    p->lhs = lhs_idx; p->rhs_len = 0; p->has_eps = 0;
+    return p;
+}
+static void prod_sym(Production *p, const char *s) {
+    if (p->rhs_len < MAX_RHS) strcpy(p->rhs[p->rhs_len++], s);
+}
+static void prod_nt(Production *p, int idx) {
+    char buf[8]; sprintf(buf, "#%d", idx);
+    if (p->rhs_len < MAX_RHS) strcpy(p->rhs[p->rhs_len++], buf);
+}
+static void end_prod(Production *p) { p->has_eps = (p->rhs_len == 0); }
+
+#define BP(lhs)  { Production *p = begin_prod(lhs);
+#define S(s)       prod_sym(p, s);
+#define N(idx)     prod_nt(p,  idx);
+#define EP()       end_prod(p); }
+
+static void build_grammar(void) {
+    prod_count = 0;
+
+    BP(NT_PROGRAM)    N(NT_STMT_LIST)                                          EP()
+
+    BP(NT_STMT_LIST)  N(NT_STMT_LIST)  N(NT_STMT)                              EP()
+    BP(NT_STMT_LIST)  N(NT_STMT)                                               EP()
+
+    BP(NT_STMT)       N(NT_DECLARATION)                                        EP()
+    BP(NT_STMT)       N(NT_ASSIGNMENT)                                         EP()
+    BP(NT_STMT)       N(NT_IF_STMT)                                            EP()
+    BP(NT_STMT)       N(NT_WHILE_STMT)                                         EP()
+    BP(NT_STMT)       N(NT_PRINT_STMT)                                         EP()
+    BP(NT_STMT)       N(NT_BLOCK)                                              EP()
+
+    BP(NT_TYPE)       S("int")                                                 EP()
+    BP(NT_TYPE)       S("float")                                               EP()
+
+    BP(NT_DECLARATION) N(NT_TYPE) S("id") S(";")                              EP()
+    BP(NT_DECLARATION) N(NT_TYPE) S("id") S("=") N(NT_EXPR) S(";")           EP()
+
+    BP(NT_ASSIGNMENT)  S("id") S("=") N(NT_EXPR) S(";")                      EP()
+
+    BP(NT_IF_STMT)    S("if") S("(") N(NT_BOOL_EXPR) S(")") N(NT_STMT)       EP()
+    BP(NT_IF_STMT)    S("if") S("(") N(NT_BOOL_EXPR) S(")") N(NT_STMT) S("else") N(NT_STMT) EP()
+
+    BP(NT_WHILE_STMT) S("while") S("(") N(NT_BOOL_EXPR) S(")") N(NT_STMT)   EP()
+
+    BP(NT_PRINT_STMT) S("print") S("(") N(NT_EXPR) S(")") S(";")            EP()
+
+    BP(NT_BLOCK)      S("{") N(NT_STMT_LIST) S("}")                           EP()
+
+    BP(NT_EXPR)       N(NT_EXPR) S("+") N(NT_TERM)                           EP()
+    BP(NT_EXPR)       N(NT_EXPR) S("-") N(NT_TERM)                           EP()
+    BP(NT_EXPR)       N(NT_TERM)                                              EP()
+
+    BP(NT_TERM)       N(NT_TERM) S("*") N(NT_FACTOR)                         EP()
+    BP(NT_TERM)       N(NT_TERM) S("/") N(NT_FACTOR)                         EP()
+    BP(NT_TERM)       N(NT_TERM) S("%") N(NT_FACTOR)                         EP()
+    BP(NT_TERM)       N(NT_FACTOR)                                            EP()
+
+    BP(NT_FACTOR)     S("(") N(NT_EXPR) S(")")                               EP()
+    BP(NT_FACTOR)     S("Int_num")                                            EP()
+    BP(NT_FACTOR)     S("Float_num")                                          EP()
+    BP(NT_FACTOR)     S("id")                                                 EP()
+
+    BP(NT_BOOL_EXPR)  N(NT_BOOL_EXPR) S("&&") N(NT_BOOL_EXPR)               EP()
+    BP(NT_BOOL_EXPR)  N(NT_BOOL_EXPR) S("||") N(NT_BOOL_EXPR)               EP()
+    BP(NT_BOOL_EXPR)  S("!")  N(NT_BOOL_EXPR)                                EP()
+    BP(NT_BOOL_EXPR)  N(NT_EXPR) N(NT_RELOP) N(NT_EXPR)                      EP()
+    BP(NT_BOOL_EXPR)  S("(") N(NT_BOOL_EXPR) S(")")                          EP()
+
+    BP(NT_RELOP)      S("<")                                                  EP()
+    BP(NT_RELOP)      S(">")                                                  EP()
+    BP(NT_RELOP)      S("<=")                                                 EP()
+    BP(NT_RELOP)      S(">=")                                                 EP()
+    BP(NT_RELOP)      S("==")                                                 EP()
+    BP(NT_RELOP)      S("!=")                                                 EP()
+
+#undef BP
+#undef S
+#undef N
+#undef EP
+}
+
+static int first_of_string(char rhs[][SYM_LEN], int len, TermSet *out) {
+    if (len == 0) { out->has_eps = 1; return 1; }
+    int all_nullable = 1;
+    for (int i = 0; i < len; i++) {
+        if (is_nt(rhs[i])) {
+            int ni = nt_idx(rhs[i]);
+            ts_merge(out, &first_set[ni]);
+            if (!first_set[ni].has_eps) { all_nullable = 0; break; }
+        } else {
+            ts_add(out, rhs[i]);
+            all_nullable = 0;
+            break;
+        }
+    }
+    if (all_nullable) out->has_eps = 1;
+    return all_nullable;
+}
+
+static void compute_first(void) {
+    memset(first_set, 0, sizeof(first_set));
+    int changed = 1;
+    while (changed) {
+        changed = 0;
+        for (int i = 0; i < prod_count; i++) {
+            Production *p = &prods[i];
+            TermSet tmp; memset(&tmp, 0, sizeof(tmp));
+            int nullable = first_of_string(p->rhs, p->rhs_len, &tmp);
+            if (nullable && !first_set[p->lhs].has_eps) {
+                first_set[p->lhs].has_eps = 1; changed = 1;
+            }
+            if (ts_merge(&first_set[p->lhs], &tmp)) changed = 1;
+        }
+    }
+}
+
+static void compute_follow(void) {
+    memset(follow_set, 0, sizeof(follow_set));
+    ts_add(&follow_set[NT_PROGRAM], "$");
+
+    int changed = 1;
+    while (changed) {
+        changed = 0;
+        for (int i = 0; i < prod_count; i++) {
+            Production *p = &prods[i];
+            for (int j = 0; j < p->rhs_len; j++) {
+                if (!is_nt(p->rhs[j])) continue;
+                int B = nt_idx(p->rhs[j]);
+                TermSet tmp; memset(&tmp, 0, sizeof(tmp));
+                int beta_nullable = first_of_string(p->rhs + j + 1,
+                                                    p->rhs_len - j - 1, &tmp);
+                if (ts_merge(&follow_set[B], &tmp)) changed = 1;
+                if (beta_nullable) {
+                    if (ts_merge(&follow_set[B], &follow_set[p->lhs])) changed = 1;
+                }
+            }
+        }
+    }
+}
+
+static void print_term_set(const TermSet *s) {
+    printf("{ ");
+    for (int i = 0; i < s->count; i++) printf("%s, ", s->terms[i]);
+    if (s->has_eps) printf("ε ");
+    printf("}");
+}
+
+void printFirstSets(void) {
+    printf("\nFIRST sets:\n");
+    for (int i = 0; i < MAX_NT; i++) {
+        printf("  FIRST(%-14s) = ", nt_name[i]);
+        print_term_set(&first_set[i]);
+        printf("\n");
+    }
+}
+
+void printFollowSets(void) {
+    printf("\nFOLLOW sets:\n");
+    for (int i = 0; i < MAX_NT; i++) {
+        printf("  FOLLOW(%-14s) = ", nt_name[i]);
+        print_term_set(&follow_set[i]);
+        printf("\n");
+    }
+}
+
+void printLL1Table() {
+    printf("\nLL(1) Parsing Table:\n");
+    printf("%-15s | %-10s | %-9s | %-9s | %-9s | %-9s | %-7s | %s\n",
+           "Non-terminal","int/float","id","if","while","print","{","$");
+    printf("%-15s-+-%-10s-+-%-9s-+-%-9s-+-%-9s-+-%-9s-+-%-7s-+%s\n",
+           "---------------","-----------","----------","----------","----------","----------","--------","----");
+    printf("%-15s | %-10s | %-9s | %-9s | %-9s | %-9s | %-7s | %s\n",
+           "program","->SL","->SL","->SL","->SL","->SL","->SL","-");
+    printf("%-15s | %-10s | %-9s | %-9s | %-9s | %-9s | %-7s | %s\n",
+           "stmt_list","->SL stmt","->SL stmt","->SL stmt","->SL stmt","->SL stmt","->SL stmt","-");
+    printf("%-15s | %-10s | %-9s | %-9s | %-9s | %-9s | %-7s | %s\n",
+           "stmt","->decl","->assign","->if","->while","->print","->block","-");
+    printf("%-15s | %-10s | %-9s | %-9s | %-9s | %-9s | %-7s | %s\n",
+           "type","->int/flt","-","-","-","-","-","-");
+    printf("%-15s | %-10s | %-9s | %-9s | %-9s | %-9s | %-7s | %s\n",
+           "declaration","->type id;","-","-","-","-","-","-");
+    printf("%-15s | %-10s | %-9s | %-9s | %-9s | %-9s | %-7s | %s\n",
+           "assignment","-","->id=e;","-","-","-","-","-");
+    printf("%-15s | %-10s | %-9s | %-9s | %-9s | %-9s | %-7s | %s\n",
+           "if_stmt","-","-","->if(b)s","-","-","-","-");
+    printf("%-15s | %-10s | %-9s | %-9s | %-9s | %-9s | %-7s | %s\n",
+           "while_stmt","-","-","-","->wh(b)s","-","-","-");
+    printf("%-15s | %-10s | %-9s | %-9s | %-9s | %-9s | %-7s | %s\n",
+           "print_stmt","-","-","-","-","->pr(e);","-","-");
+    printf("%-15s | %-10s | %-9s | %-9s | %-9s | %-9s | %-7s | %s\n",
+           "block","-","-","-","-","-","->{SL}","-");
+    printf("%-15s | %-16s | %-12s | %-8s | %s\n",
+           "Non-terminal","id/Int_num/Float","( ... )","!","relops");
+    printf("%-15s-+-%-16s-+-%-12s-+-%-8s-+%s\n",
+           "---------------","-----------------","-------------","---------","-------------------");
+    printf("%-15s | %-16s | %-12s | %-8s | %s\n",
+           "expr","->term","->term","-","-");
+    printf("%-15s | %-16s | %-12s | %-8s | %s\n",
+           "term","->factor","->factor","-","-");
+    printf("%-15s | %-16s | %-12s | %-8s | %s\n",
+           "factor","->id/Int/Float","->(expr)","-","-");
+    printf("%-15s | %-16s | %-12s | %-8s | %s\n",
+           "bool_expr","->e relop e","->e relop e","->!bool","-");
+    printf("%-15s | %-16s | %-12s | %-8s | %s\n",
+           "relop","-","-","-","-> operator node");
+}
+
+#line 448 "y.tab.c"
 
 # ifndef YY_CAST
 #  ifdef __cplusplus
@@ -186,12 +537,12 @@ extern int yydebug;
 #if ! defined YYSTYPE && ! defined YYSTYPE_IS_DECLARED
 union YYSTYPE
 {
-#line 27 "parser.y"
+#line 378 "parser.y"
 
     char* sval;
-    struct node* nval;
+    struct node* n;
 
-#line 195 "y.tab.c"
+#line 546 "y.tab.c"
 
 };
 typedef union YYSTYPE YYSTYPE;
@@ -247,8 +598,8 @@ enum yysymbol_kind_t
   YYSYMBOL_program = 33,                   /* program  */
   YYSYMBOL_stmt_list = 34,                 /* stmt_list  */
   YYSYMBOL_stmt = 35,                      /* stmt  */
-  YYSYMBOL_declaration = 36,               /* declaration  */
-  YYSYMBOL_type = 37,                      /* type  */
+  YYSYMBOL_type = 36,                      /* type  */
+  YYSYMBOL_declaration = 37,               /* declaration  */
   YYSYMBOL_assignment = 38,                /* assignment  */
   YYSYMBOL_print_stmt = 39,                /* print_stmt  */
   YYSYMBOL_block = 40,                     /* block  */
@@ -644,14 +995,14 @@ static const yytype_int8 yytranslate[] =
 
 #if YYDEBUG
 /* YYRLINE[YYN] -- Source line where rule number YYN was defined.  */
-static const yytype_uint8 yyrline[] =
+static const yytype_int16 yyrline[] =
 {
-       0,    49,    49,    53,    54,    58,    59,    60,    61,    62,
-      63,    65,    71,    79,    83,    88,    96,    97,   101,   106,
-     112,   120,   125,   131,   139,   141,   149,   153,   158,   164,
-     172,   178,   184,   192,   193,   194,   198,   199,   200,   201,
-     205,   206,   207,   208,   212,   213,   214,   215,   216,   220,
-     221,   222,   223,   224,   225
+       0,   404,   404,   408,   412,   419,   420,   421,   422,   423,
+     424,   426,   431,   439,   440,   444,   450,   456,   464,   470,
+     475,   483,   489,   494,   502,   503,   511,   517,   523,   528,
+     536,   542,   547,   555,   556,   557,   561,   562,   563,   564,
+     568,   569,   570,   571,   575,   576,   577,   578,   579,   583,
+     584,   585,   586,   587,   588
 };
 #endif
 
@@ -671,7 +1022,7 @@ static const char *const yytname[] =
   "ELSE", "WHILE", "PRINT", "ID", "Int_num", "Float_num", "AND", "OR",
   "NOT", "LE", "GE", "EQ", "NE", "LT", "GT", "'+'", "'-'", "'*'", "'/'",
   "'%'", "';'", "'}'", "'='", "'('", "')'", "'{'", "$accept", "program",
-  "stmt_list", "stmt", "declaration", "type", "assignment", "print_stmt",
+  "stmt_list", "stmt", "type", "declaration", "assignment", "print_stmt",
   "block", "if_stmt", "while_stmt", "expr", "term", "factor", "bool_expr",
   "relop", YY_NULLPTR
 };
@@ -698,7 +1049,7 @@ yysymbol_name (yysymbol_kind_t yysymbol)
 static const yytype_int16 yypact[] =
 {
       59,   134,   -24,   -24,    15,    18,    21,     8,    71,     7,
-      25,   -24,   -24,     1,   -24,   -24,   -24,   -24,   -24,   -24,
+      25,   -24,     1,   -24,   -24,   -24,   -24,   -24,   -24,   -24,
      -24,    59,    72,    59,    83,   -11,    48,    -2,    95,   138,
       34,   -24,   -24,    19,   -14,   -24,    -3,   -24,   -24,   -24,
       89,    89,   135,    64,   -24,    96,   -24,    55,    98,   -24,
@@ -715,17 +1066,17 @@ static const yytype_int16 yypact[] =
    means the default is an error.  */
 static const yytype_int8 yydefact[] =
 {
-       0,     0,    16,    17,     0,     0,     0,     0,     0,     0,
-       0,     4,     5,     0,     6,     9,    10,     7,     8,    11,
+       0,     0,    13,    14,     0,     0,     0,     0,     0,     0,
+       0,     4,     0,     5,     6,     9,    10,     7,     8,    11,
       12,     0,     0,     0,     0,     0,     0,     0,     0,     0,
-       0,     1,     3,     0,     0,    29,     0,    41,    42,    43,
+       0,     1,     3,     0,     0,    29,     0,    43,    41,    42,
        0,     0,     0,    35,    39,     0,    32,     0,     0,    23,
-       0,     0,     0,    20,     0,     0,    12,    24,    15,    13,
+       0,     0,     0,    20,     0,     0,    12,    24,    17,    15,
        0,     0,    46,     0,     0,    51,    52,    53,    54,    49,
       50,     0,     0,     0,     0,     0,     0,     0,     0,     0,
        0,     0,     0,     0,     0,    19,    18,     0,    28,    40,
       48,    33,    34,    47,    36,    37,    38,    44,    45,    26,
-      31,    30,    22,    21,    14,     0,    27
+      31,    30,    22,    21,    16,     0,    27
 };
 
 /* YYPGOTO[NTERM-NUM].  */
@@ -808,7 +1159,7 @@ static const yytype_int8 yystos[] =
 static const yytype_int8 yyr1[] =
 {
        0,    32,    33,    34,    34,    35,    35,    35,    35,    35,
-      35,    35,    35,    36,    36,    36,    37,    37,    38,    38,
+      35,    35,    35,    36,    36,    37,    37,    37,    38,    38,
       38,    39,    39,    39,    40,    40,    41,    41,    41,    41,
       42,    42,    42,    43,    43,    43,    44,    44,    44,    44,
       45,    45,    45,    45,    46,    46,    46,    46,    46,    47,
@@ -819,7 +1170,7 @@ static const yytype_int8 yyr1[] =
 static const yytype_int8 yyr2[] =
 {
        0,     2,     1,     2,     1,     1,     1,     1,     1,     1,
-       1,     2,     2,     3,     5,     3,     1,     1,     4,     4,
+       1,     2,     2,     1,     1,     3,     5,     3,     4,     4,
        3,     5,     5,     3,     3,     3,     5,     7,     5,     3,
        5,     5,     3,     3,     3,     1,     3,     3,     3,     1,
        3,     1,     1,     1,     3,     3,     2,     3,     3,     1,
@@ -1287,394 +1638,414 @@ yyreduce:
   switch (yyn)
     {
   case 2: /* program: stmt_list  */
-#line 49 "parser.y"
-              { final_root = (yyvsp[0].nval); }
-#line 1293 "y.tab.c"
-    break;
-
-  case 3: /* stmt_list: stmt_list stmt  */
-#line 53 "parser.y"
-                   { (yyval.nval) = mknode("STMT_LIST", (yyvsp[-1].nval), (yyvsp[0].nval), NULL); }
-#line 1299 "y.tab.c"
-    break;
-
-  case 4: /* stmt_list: stmt  */
-#line 54 "parser.y"
-                   { (yyval.nval) = (yyvsp[0].nval); }
-#line 1305 "y.tab.c"
-    break;
-
-  case 5: /* stmt: declaration  */
-#line 58 "parser.y"
-                   { (yyval.nval) = (yyvsp[0].nval); }
-#line 1311 "y.tab.c"
-    break;
-
-  case 6: /* stmt: assignment  */
-#line 59 "parser.y"
-                   { (yyval.nval) = (yyvsp[0].nval); }
-#line 1317 "y.tab.c"
-    break;
-
-  case 7: /* stmt: if_stmt  */
-#line 60 "parser.y"
-                   { (yyval.nval) = (yyvsp[0].nval); }
-#line 1323 "y.tab.c"
-    break;
-
-  case 8: /* stmt: while_stmt  */
-#line 61 "parser.y"
-                   { (yyval.nval) = (yyvsp[0].nval); }
-#line 1329 "y.tab.c"
-    break;
-
-  case 9: /* stmt: print_stmt  */
-#line 62 "parser.y"
-                   { (yyval.nval) = (yyvsp[0].nval); }
-#line 1335 "y.tab.c"
-    break;
-
-  case 10: /* stmt: block  */
-#line 63 "parser.y"
-                   { (yyval.nval) = (yyvsp[0].nval); }
-#line 1341 "y.tab.c"
-    break;
-
-  case 11: /* stmt: error ';'  */
-#line 65 "parser.y"
-                    {
-        fprintf(stderr, "Reason : Ill-formed statement — possibly missing ';', ')'\n\n");
-        (yyval.nval) = mknode("ERROR_STMT", NULL, NULL, NULL);
-        yyerrok;
-    }
-#line 1351 "y.tab.c"
-    break;
-
-  case 12: /* stmt: error '}'  */
-#line 71 "parser.y"
-                {
-        fprintf(stderr, "Reason : Ill-formed block — possibly missing '{' or extra '}'\n");
-        (yyval.nval) = mknode("ERROR_BLOCK", NULL, NULL, NULL);
-        yyerrok;
-    }
-#line 1361 "y.tab.c"
-    break;
-
-  case 13: /* declaration: type ID ';'  */
-#line 79 "parser.y"
-                {
-        printf("Line %d: Syntactic Validation [Declaration: %s]\n", line, (yyvsp[-1].sval));
-        (yyval.nval) = mknode("Decl", (yyvsp[-2].nval), mknode((yyvsp[-1].sval), NULL, NULL, NULL), NULL);
-    }
-#line 1370 "y.tab.c"
-    break;
-
-  case 14: /* declaration: type ID '=' expr ';'  */
-#line 83 "parser.y"
-                           {
-        printf("Line %d: Syntactic Validation [Decl & Assign: %s]\n", line, (yyvsp[-3].sval));
-        (yyval.nval) = mknode("Decl=", (yyvsp[-4].nval), mknode((yyvsp[-3].sval), NULL, NULL, NULL), (yyvsp[-1].nval));
-    }
-#line 1379 "y.tab.c"
-    break;
-
-  case 15: /* declaration: type error ';'  */
-#line 88 "parser.y"
-                     {
-        fprintf(stderr, "Reason : Invalid declaration — expected a variable name after type, got an invalid token\n");
-        (yyval.nval) = mknode("ERROR_DECL", (yyvsp[-2].nval), NULL, NULL);
-        yyerrok;
-    }
-#line 1389 "y.tab.c"
-    break;
-
-  case 16: /* type: INT  */
-#line 96 "parser.y"
-          { (yyval.nval) = mknode("int",   NULL, NULL, NULL); }
-#line 1395 "y.tab.c"
-    break;
-
-  case 17: /* type: FLOAT  */
-#line 97 "parser.y"
-            { (yyval.nval) = mknode("float", NULL, NULL, NULL); }
-#line 1401 "y.tab.c"
-    break;
-
-  case 18: /* assignment: ID '=' expr ';'  */
-#line 101 "parser.y"
-                    {
-        printf("Line %d: Syntactic Validation [Assignment to %s]\n", line, (yyvsp[-3].sval));
-        (yyval.nval) = mknode("=", mknode((yyvsp[-3].sval), NULL, NULL, NULL), (yyvsp[-1].nval), NULL);
-    }
-#line 1410 "y.tab.c"
-    break;
-
-  case 19: /* assignment: ID '=' error ';'  */
-#line 106 "parser.y"
-                       {
-        fprintf(stderr, "Reason : Invalid assignment — ill-formed or missing expression\n");
-        (yyval.nval) = mknode("ERROR_ASSIGN", mknode((yyvsp[-3].sval), NULL, NULL, NULL), NULL, NULL);
-        yyerrok;
-    }
-#line 1420 "y.tab.c"
-    break;
-
-  case 20: /* assignment: ID error ';'  */
-#line 112 "parser.y"
-                   {
-        fprintf(stderr, "Reason : Invalid assignment — missing '=' after variable name '%s'\n", (yyvsp[-2].sval));
-        (yyval.nval) = mknode("ERROR_ASSIGN", mknode((yyvsp[-2].sval), NULL, NULL, NULL), NULL, NULL);
-        yyerrok;
-    }
-#line 1430 "y.tab.c"
-    break;
-
-  case 21: /* print_stmt: PRINT '(' expr ')' ';'  */
-#line 120 "parser.y"
-                           {
-        printf("Line %d: Syntactic Validation [Print Statement]\n", line);
-        (yyval.nval) = mknode("PRINT", (yyvsp[-2].nval), NULL, NULL);
-    }
-#line 1439 "y.tab.c"
-    break;
-
-  case 22: /* print_stmt: PRINT '(' error ')' ';'  */
-#line 125 "parser.y"
-                              {
-        fprintf(stderr, "Reason : Invalid print statement — ill-formed expression\n");
-        (yyval.nval) = mknode("ERROR_PRINT", NULL, NULL, NULL);
-        yyerrok;
-    }
-#line 1449 "y.tab.c"
-    break;
-
-  case 23: /* print_stmt: PRINT error ';'  */
-#line 131 "parser.y"
-                      {
-        fprintf(stderr, "Reason : Invalid print statement — missing '(' and/or ')' around the argument\n");
-        (yyval.nval) = mknode("ERROR_PRINT", NULL, NULL, NULL);
-        yyerrok;
-    }
-#line 1459 "y.tab.c"
-    break;
-
-  case 24: /* block: '{' stmt_list '}'  */
-#line 139 "parser.y"
-                      { (yyval.nval) = (yyvsp[-1].nval); }
-#line 1465 "y.tab.c"
-    break;
-
-  case 25: /* block: '{' error '}'  */
-#line 141 "parser.y"
-                    {
-        fprintf(stderr, "Reason : Ill-formed block body\n");
-        (yyval.nval) = mknode("ERROR_BLOCK", NULL, NULL, NULL);
-        yyerrok;
-    }
-#line 1475 "y.tab.c"
-    break;
-
-  case 26: /* if_stmt: IF '(' bool_expr ')' stmt  */
-#line 149 "parser.y"
-                              {
-        printf("Line %d: Syntactic Validation [If Block]\n", line);
-        (yyval.nval) = mknode("IF", (yyvsp[-2].nval), (yyvsp[0].nval), NULL);
-    }
-#line 1484 "y.tab.c"
-    break;
-
-  case 27: /* if_stmt: IF '(' bool_expr ')' stmt ELSE stmt  */
-#line 153 "parser.y"
-                                          {
-        printf("Line %d: Syntactic Validation [If-Else Block]\n", line);
-        (yyval.nval) = mknode("IF-ELSE", (yyvsp[-4].nval), (yyvsp[-2].nval), (yyvsp[0].nval));
-    }
-#line 1493 "y.tab.c"
-    break;
-
-  case 28: /* if_stmt: IF '(' error ')' stmt  */
-#line 158 "parser.y"
-                            {
-        fprintf(stderr, "Reason : Invalid if-statement — ill-formed condition\n");
-        (yyval.nval) = mknode("ERROR_IF", NULL, (yyvsp[0].nval), NULL);
-        yyerrok;
-    }
-#line 1503 "y.tab.c"
-    break;
-
-  case 29: /* if_stmt: IF error stmt  */
-#line 164 "parser.y"
-                    {
-        fprintf(stderr, "Reason : Invalid if-statement — missing '(' and/or ')' around condition\n");
-        (yyval.nval) = mknode("ERROR_IF", NULL, (yyvsp[0].nval), NULL);
-        yyerrok;
-    }
-#line 1513 "y.tab.c"
-    break;
-
-  case 30: /* while_stmt: WHILE '(' bool_expr ')' stmt  */
-#line 172 "parser.y"
-                                 {
-        printf("Line %d: Syntactic Validation [While Loop]\n", line);
-        (yyval.nval) = mknode("WHILE", (yyvsp[-2].nval), (yyvsp[0].nval), NULL);
-    }
-#line 1522 "y.tab.c"
-    break;
-
-  case 31: /* while_stmt: WHILE '(' error ')' stmt  */
-#line 178 "parser.y"
-                               {
-        fprintf(stderr, "Reason : Invalid while-loop - ill-formed condition\n");
-        (yyval.nval) = mknode("ERROR_WHILE", NULL, (yyvsp[0].nval), NULL);
-        yyerrok;
-    }
-#line 1532 "y.tab.c"
-    break;
-
-  case 32: /* while_stmt: WHILE error stmt  */
-#line 184 "parser.y"
-                       {
-        fprintf(stderr, "Reason : Invalid while-loop — missing '(' and/or ')' around condition\n");
-        (yyval.nval) = mknode("ERROR_WHILE", NULL, (yyvsp[0].nval), NULL);
-        yyerrok;
-    }
-#line 1542 "y.tab.c"
-    break;
-
-  case 33: /* expr: expr '+' term  */
-#line 192 "parser.y"
-                  { (yyval.nval) = mknode("+", (yyvsp[-2].nval), (yyvsp[0].nval), NULL); }
-#line 1548 "y.tab.c"
-    break;
-
-  case 34: /* expr: expr '-' term  */
-#line 193 "parser.y"
-                    { (yyval.nval) = mknode("-", (yyvsp[-2].nval), (yyvsp[0].nval), NULL); }
-#line 1554 "y.tab.c"
-    break;
-
-  case 35: /* expr: term  */
-#line 194 "parser.y"
-           { (yyval.nval) = (yyvsp[0].nval); }
-#line 1560 "y.tab.c"
-    break;
-
-  case 36: /* term: term '*' factor  */
-#line 198 "parser.y"
-                    { (yyval.nval) = mknode("*",  (yyvsp[-2].nval), (yyvsp[0].nval), NULL); }
-#line 1566 "y.tab.c"
-    break;
-
-  case 37: /* term: term '/' factor  */
-#line 199 "parser.y"
-                      { (yyval.nval) = mknode("/",  (yyvsp[-2].nval), (yyvsp[0].nval), NULL); }
-#line 1572 "y.tab.c"
-    break;
-
-  case 38: /* term: term '%' factor  */
-#line 200 "parser.y"
-                      { (yyval.nval) = mknode("%",  (yyvsp[-2].nval), (yyvsp[0].nval), NULL); }
-#line 1578 "y.tab.c"
-    break;
-
-  case 39: /* term: factor  */
-#line 201 "parser.y"
-             { (yyval.nval) = (yyvsp[0].nval); }
-#line 1584 "y.tab.c"
-    break;
-
-  case 40: /* factor: '(' expr ')'  */
-#line 205 "parser.y"
-                 { (yyval.nval) = (yyvsp[-1].nval); }
-#line 1590 "y.tab.c"
-    break;
-
-  case 41: /* factor: ID  */
-#line 206 "parser.y"
-                { (yyval.nval) = mknode((yyvsp[0].sval), NULL, NULL, NULL); }
-#line 1596 "y.tab.c"
-    break;
-
-  case 42: /* factor: Int_num  */
-#line 207 "parser.y"
-                { (yyval.nval) = mknode((yyvsp[0].sval), NULL, NULL, NULL); }
-#line 1602 "y.tab.c"
-    break;
-
-  case 43: /* factor: Float_num  */
-#line 208 "parser.y"
-                { (yyval.nval) = mknode((yyvsp[0].sval), NULL, NULL, NULL); }
-#line 1608 "y.tab.c"
-    break;
-
-  case 44: /* bool_expr: bool_expr AND bool_expr  */
-#line 212 "parser.y"
-                            { (yyval.nval) = mknode("&&", (yyvsp[-2].nval), (yyvsp[0].nval), NULL); }
-#line 1614 "y.tab.c"
-    break;
-
-  case 45: /* bool_expr: bool_expr OR bool_expr  */
-#line 213 "parser.y"
-                              { (yyval.nval) = mknode("||", (yyvsp[-2].nval), (yyvsp[0].nval), NULL); }
-#line 1620 "y.tab.c"
-    break;
-
-  case 46: /* bool_expr: NOT bool_expr  */
-#line 214 "parser.y"
-                              { (yyval.nval) = mknode("!",  (yyvsp[0].nval), NULL, NULL); }
-#line 1626 "y.tab.c"
-    break;
-
-  case 47: /* bool_expr: expr relop expr  */
-#line 215 "parser.y"
-                              { (yyval.nval) = mknode("RELOP", (yyvsp[-2].nval), (yyvsp[-1].nval), (yyvsp[0].nval)); }
-#line 1632 "y.tab.c"
-    break;
-
-  case 48: /* bool_expr: '(' bool_expr ')'  */
-#line 216 "parser.y"
-                              { (yyval.nval) = (yyvsp[-1].nval); }
-#line 1638 "y.tab.c"
-    break;
-
-  case 49: /* relop: LT  */
-#line 220 "parser.y"
-       { (yyval.nval) = mknode("<",  NULL, NULL, NULL); }
+#line 404 "parser.y"
+              { root = (yyvsp[0].n); }
 #line 1644 "y.tab.c"
     break;
 
-  case 50: /* relop: GT  */
-#line 221 "parser.y"
-         { (yyval.nval) = mknode(">",  NULL, NULL, NULL); }
-#line 1650 "y.tab.c"
+  case 3: /* stmt_list: stmt_list stmt  */
+#line 408 "parser.y"
+                   {
+        pop_n(2); push("STMT_LIST");
+        (yyval.n) = mknode("STMT_LIST", (yyvsp[-1].n), (yyvsp[0].n), NULL);
+    }
+#line 1653 "y.tab.c"
     break;
 
-  case 51: /* relop: LE  */
-#line 222 "parser.y"
-         { (yyval.nval) = mknode("<=", NULL, NULL, NULL); }
-#line 1656 "y.tab.c"
-    break;
-
-  case 52: /* relop: GE  */
-#line 223 "parser.y"
-         { (yyval.nval) = mknode(">=", NULL, NULL, NULL); }
+  case 4: /* stmt_list: stmt  */
+#line 412 "parser.y"
+         {
+        pop_n(1); push("STMT_LIST");
+        (yyval.n) = (yyvsp[0].n);
+    }
 #line 1662 "y.tab.c"
     break;
 
-  case 53: /* relop: EQ  */
-#line 224 "parser.y"
-         { (yyval.nval) = mknode("==", NULL, NULL, NULL); }
+  case 5: /* stmt: declaration  */
+#line 419 "parser.y"
+                 { (yyval.n) = (yyvsp[0].n); }
 #line 1668 "y.tab.c"
     break;
 
-  case 54: /* relop: NE  */
-#line 225 "parser.y"
-         { (yyval.nval) = mknode("!=", NULL, NULL, NULL); }
+  case 6: /* stmt: assignment  */
+#line 420 "parser.y"
+                 { (yyval.n) = (yyvsp[0].n); }
 #line 1674 "y.tab.c"
     break;
 
+  case 7: /* stmt: if_stmt  */
+#line 421 "parser.y"
+                 { (yyval.n) = (yyvsp[0].n); }
+#line 1680 "y.tab.c"
+    break;
 
-#line 1678 "y.tab.c"
+  case 8: /* stmt: while_stmt  */
+#line 422 "parser.y"
+                 { (yyval.n) = (yyvsp[0].n); }
+#line 1686 "y.tab.c"
+    break;
+
+  case 9: /* stmt: print_stmt  */
+#line 423 "parser.y"
+                 { (yyval.n) = (yyvsp[0].n); }
+#line 1692 "y.tab.c"
+    break;
+
+  case 10: /* stmt: block  */
+#line 424 "parser.y"
+                 { (yyval.n) = (yyvsp[0].n); }
+#line 1698 "y.tab.c"
+    break;
+
+  case 11: /* stmt: error ';'  */
+#line 426 "parser.y"
+              {
+        fprintf(stderr, "Reason: Ill-formed statement — possibly missing ';' or ')'\n\n");
+        (yyval.n) = mknode("ERROR_STMT", NULL, NULL, NULL);
+        yyerrok;
+    }
+#line 1708 "y.tab.c"
+    break;
+
+  case 12: /* stmt: error '}'  */
+#line 431 "parser.y"
+              {
+        fprintf(stderr, "Reason: Ill-formed block — possibly missing '{' or extra '}'\n\n");
+        (yyval.n) = mknode("ERROR_BLOCK", NULL, NULL, NULL);
+        yyerrok;
+    }
+#line 1718 "y.tab.c"
+    break;
+
+  case 13: /* type: INT  */
+#line 439 "parser.y"
+          { (yyval.n) = mknode("int",   NULL, NULL, NULL); }
+#line 1724 "y.tab.c"
+    break;
+
+  case 14: /* type: FLOAT  */
+#line 440 "parser.y"
+          { (yyval.n) = mknode("float", NULL, NULL, NULL); }
+#line 1730 "y.tab.c"
+    break;
+
+  case 15: /* declaration: type ID ';'  */
+#line 444 "parser.y"
+                {
+        pop_n(3); push("DECL");
+        printf("------Line %d: Syntactic Validation [Declaration: %s]\n", yylineno, (yyvsp[-1].sval));
+        print_action("reduce declaration");
+        (yyval.n) = mknode("Decl", (yyvsp[-2].n), mknode((yyvsp[-1].sval), NULL, NULL, NULL), NULL);
+    }
+#line 1741 "y.tab.c"
+    break;
+
+  case 16: /* declaration: type ID '=' expr ';'  */
+#line 450 "parser.y"
+                         {
+        pop_n(5); push("DECL");
+        printf("------Line %d: Syntactic Validation [Decl & Assign: %s]\n", yylineno, (yyvsp[-3].sval));
+        print_action("reduce decl-assign");
+        (yyval.n) = mknode("Decl=", (yyvsp[-4].n), mknode((yyvsp[-3].sval), NULL, NULL, NULL), (yyvsp[-1].n));
+    }
+#line 1752 "y.tab.c"
+    break;
+
+  case 17: /* declaration: type error ';'  */
+#line 456 "parser.y"
+                   {
+        fprintf(stderr, "Reason: Invalid declaration — expected variable name after type\n\n");
+        (yyval.n) = mknode("ERROR_DECL", (yyvsp[-2].n), NULL, NULL);
+        yyerrok;
+    }
+#line 1762 "y.tab.c"
+    break;
+
+  case 18: /* assignment: ID '=' expr ';'  */
+#line 464 "parser.y"
+                    {
+        pop_n(4); push("ASSIGN");
+        printf("------Line %d: Syntactic Validation [Assignment to %s]\n", yylineno, (yyvsp[-3].sval));
+        print_action("reduce assignment");
+        (yyval.n) = mknode("=", mknode((yyvsp[-3].sval), NULL, NULL, NULL), (yyvsp[-1].n), NULL);
+    }
+#line 1773 "y.tab.c"
+    break;
+
+  case 19: /* assignment: ID '=' error ';'  */
+#line 470 "parser.y"
+                     {
+        fprintf(stderr, "Reason: Invalid assignment — ill-formed expression\n\n");
+        (yyval.n) = mknode("ERROR_ASSIGN", mknode((yyvsp[-3].sval), NULL, NULL, NULL), NULL, NULL);
+        yyerrok;
+    }
+#line 1783 "y.tab.c"
+    break;
+
+  case 20: /* assignment: ID error ';'  */
+#line 475 "parser.y"
+                 {
+        fprintf(stderr, "Reason: Invalid assignment — missing '=' after '%s'\n\n", (yyvsp[-2].sval));
+        (yyval.n) = mknode("ERROR_ASSIGN", mknode((yyvsp[-2].sval), NULL, NULL, NULL), NULL, NULL);
+        yyerrok;
+    }
+#line 1793 "y.tab.c"
+    break;
+
+  case 21: /* print_stmt: PRINT '(' expr ')' ';'  */
+#line 483 "parser.y"
+                           {
+        pop_n(5); push("PRINT");
+        printf("-------Line %d: Syntactic Validation [Print Statement]\n", yylineno);
+        print_action("reduce print");
+        (yyval.n) = mknode("PRINT", (yyvsp[-2].n), NULL, NULL);
+    }
+#line 1804 "y.tab.c"
+    break;
+
+  case 22: /* print_stmt: PRINT '(' error ')' ';'  */
+#line 489 "parser.y"
+                            {
+        fprintf(stderr, "Reason: Invalid print — ill-formed expression\n\n");
+        (yyval.n) = mknode("ERROR_PRINT", NULL, NULL, NULL);
+        yyerrok;
+    }
+#line 1814 "y.tab.c"
+    break;
+
+  case 23: /* print_stmt: PRINT error ';'  */
+#line 494 "parser.y"
+                    {
+        fprintf(stderr, "Reason: Invalid print — missing '(' / ')'\n\n");
+        (yyval.n) = mknode("ERROR_PRINT", NULL, NULL, NULL);
+        yyerrok;
+    }
+#line 1824 "y.tab.c"
+    break;
+
+  case 24: /* block: '{' stmt_list '}'  */
+#line 502 "parser.y"
+                      { (yyval.n) = (yyvsp[-1].n); }
+#line 1830 "y.tab.c"
+    break;
+
+  case 25: /* block: '{' error '}'  */
+#line 503 "parser.y"
+                  {
+        fprintf(stderr, "Reason: Ill-formed block body\n\n");
+        (yyval.n) = mknode("ERROR_BLOCK", NULL, NULL, NULL);
+        yyerrok;
+    }
+#line 1840 "y.tab.c"
+    break;
+
+  case 26: /* if_stmt: IF '(' bool_expr ')' stmt  */
+#line 511 "parser.y"
+                              {
+        pop_n(5); push("IF");
+        printf("------Line %d: Syntactic Validation [If Block]\n", yylineno);
+        print_action("reduce if");
+        (yyval.n) = mknode("IF", (yyvsp[-2].n), (yyvsp[0].n), NULL);
+    }
+#line 1851 "y.tab.c"
+    break;
+
+  case 27: /* if_stmt: IF '(' bool_expr ')' stmt ELSE stmt  */
+#line 517 "parser.y"
+                                        {
+        pop_n(7); push("IF-ELSE");
+        printf("-----Line %d: Syntactic Validation [If-Else Block]\n", yylineno);
+        print_action("reduce if-else");
+        (yyval.n) = mknode("IF-ELSE", (yyvsp[-4].n), (yyvsp[-2].n), (yyvsp[0].n));
+    }
+#line 1862 "y.tab.c"
+    break;
+
+  case 28: /* if_stmt: IF '(' error ')' stmt  */
+#line 523 "parser.y"
+                          {
+        fprintf(stderr, "Reason: Invalid if — ill-formed condition\n\n");
+        (yyval.n) = mknode("ERROR_IF", NULL, (yyvsp[0].n), NULL);
+        yyerrok;
+    }
+#line 1872 "y.tab.c"
+    break;
+
+  case 29: /* if_stmt: IF error stmt  */
+#line 528 "parser.y"
+                  {
+        fprintf(stderr, "Reason: Invalid if — missing '(' / ')'\n\n");
+        (yyval.n) = mknode("ERROR_IF", NULL, (yyvsp[0].n), NULL);
+        yyerrok;
+    }
+#line 1882 "y.tab.c"
+    break;
+
+  case 30: /* while_stmt: WHILE '(' bool_expr ')' stmt  */
+#line 536 "parser.y"
+                                 {
+        pop_n(5); push("WHILE");
+        printf("-----Line %d: Syntactic Validation [While Loop]\n", yylineno);
+        print_action("reduce while");
+        (yyval.n) = mknode("WHILE", (yyvsp[-2].n), (yyvsp[0].n), NULL);
+    }
+#line 1893 "y.tab.c"
+    break;
+
+  case 31: /* while_stmt: WHILE '(' error ')' stmt  */
+#line 542 "parser.y"
+                             {
+        fprintf(stderr, "Reason: Invalid while — ill-formed condition\n\n");
+        (yyval.n) = mknode("ERROR_WHILE", NULL, (yyvsp[0].n), NULL);
+        yyerrok;
+    }
+#line 1903 "y.tab.c"
+    break;
+
+  case 32: /* while_stmt: WHILE error stmt  */
+#line 547 "parser.y"
+                     {
+        fprintf(stderr, "Reason: Invalid while — missing '(' / ')'\n\n");
+        (yyval.n) = mknode("ERROR_WHILE", NULL, (yyvsp[0].n), NULL);
+        yyerrok;
+    }
+#line 1913 "y.tab.c"
+    break;
+
+  case 33: /* expr: expr '+' term  */
+#line 555 "parser.y"
+                  { pop_n(3); push("expr"); (yyval.n) = mknode("+", (yyvsp[-2].n), (yyvsp[0].n), NULL); }
+#line 1919 "y.tab.c"
+    break;
+
+  case 34: /* expr: expr '-' term  */
+#line 556 "parser.y"
+                  { pop_n(3); push("expr"); (yyval.n) = mknode("-", (yyvsp[-2].n), (yyvsp[0].n), NULL); }
+#line 1925 "y.tab.c"
+    break;
+
+  case 35: /* expr: term  */
+#line 557 "parser.y"
+                  { pop_n(1); push("expr"); (yyval.n) = (yyvsp[0].n); }
+#line 1931 "y.tab.c"
+    break;
+
+  case 36: /* term: term '*' factor  */
+#line 561 "parser.y"
+                    { pop_n(3); push("term"); (yyval.n) = mknode("*",  (yyvsp[-2].n), (yyvsp[0].n), NULL); }
+#line 1937 "y.tab.c"
+    break;
+
+  case 37: /* term: term '/' factor  */
+#line 562 "parser.y"
+                    { pop_n(3); push("term"); (yyval.n) = mknode("/",  (yyvsp[-2].n), (yyvsp[0].n), NULL); }
+#line 1943 "y.tab.c"
+    break;
+
+  case 38: /* term: term '%' factor  */
+#line 563 "parser.y"
+                    { pop_n(3); push("term"); (yyval.n) = mknode("%",  (yyvsp[-2].n), (yyvsp[0].n), NULL); }
+#line 1949 "y.tab.c"
+    break;
+
+  case 39: /* term: factor  */
+#line 564 "parser.y"
+                    { pop_n(1); push("term"); (yyval.n) = (yyvsp[0].n); }
+#line 1955 "y.tab.c"
+    break;
+
+  case 40: /* factor: '(' expr ')'  */
+#line 568 "parser.y"
+                  { pop_n(3); push("factor"); (yyval.n) = (yyvsp[-1].n); }
+#line 1961 "y.tab.c"
+    break;
+
+  case 41: /* factor: Int_num  */
+#line 569 "parser.y"
+                  { pop_n(1); push("factor"); (yyval.n) = mknode((yyvsp[0].sval), NULL, NULL, NULL); }
+#line 1967 "y.tab.c"
+    break;
+
+  case 42: /* factor: Float_num  */
+#line 570 "parser.y"
+                  { pop_n(1); push("factor"); (yyval.n) = mknode((yyvsp[0].sval), NULL, NULL, NULL); }
+#line 1973 "y.tab.c"
+    break;
+
+  case 43: /* factor: ID  */
+#line 571 "parser.y"
+                  { pop_n(1); push("factor"); (yyval.n) = mknode((yyvsp[0].sval), NULL, NULL, NULL); }
+#line 1979 "y.tab.c"
+    break;
+
+  case 44: /* bool_expr: bool_expr AND bool_expr  */
+#line 575 "parser.y"
+                            { pop_n(3); push("bool"); (yyval.n) = mknode("&&", (yyvsp[-2].n), (yyvsp[0].n), NULL); }
+#line 1985 "y.tab.c"
+    break;
+
+  case 45: /* bool_expr: bool_expr OR bool_expr  */
+#line 576 "parser.y"
+                            { pop_n(3); push("bool"); (yyval.n) = mknode("||", (yyvsp[-2].n), (yyvsp[0].n), NULL); }
+#line 1991 "y.tab.c"
+    break;
+
+  case 46: /* bool_expr: NOT bool_expr  */
+#line 577 "parser.y"
+                            { pop_n(2); push("bool"); (yyval.n) = mknode("!",  (yyvsp[0].n), NULL, NULL); }
+#line 1997 "y.tab.c"
+    break;
+
+  case 47: /* bool_expr: expr relop expr  */
+#line 578 "parser.y"
+                            { pop_n(3); push("bool"); (yyval.n) = mknode("RELOP", (yyvsp[-2].n), (yyvsp[-1].n), (yyvsp[0].n)); }
+#line 2003 "y.tab.c"
+    break;
+
+  case 48: /* bool_expr: '(' bool_expr ')'  */
+#line 579 "parser.y"
+                            { pop_n(3); push("bool"); (yyval.n) = (yyvsp[-1].n); }
+#line 2009 "y.tab.c"
+    break;
+
+  case 49: /* relop: LT  */
+#line 583 "parser.y"
+       { (yyval.n) = mknode("<",  NULL, NULL, NULL); }
+#line 2015 "y.tab.c"
+    break;
+
+  case 50: /* relop: GT  */
+#line 584 "parser.y"
+       { (yyval.n) = mknode(">",  NULL, NULL, NULL); }
+#line 2021 "y.tab.c"
+    break;
+
+  case 51: /* relop: LE  */
+#line 585 "parser.y"
+       { (yyval.n) = mknode("<=", NULL, NULL, NULL); }
+#line 2027 "y.tab.c"
+    break;
+
+  case 52: /* relop: GE  */
+#line 586 "parser.y"
+       { (yyval.n) = mknode(">=", NULL, NULL, NULL); }
+#line 2033 "y.tab.c"
+    break;
+
+  case 53: /* relop: EQ  */
+#line 587 "parser.y"
+       { (yyval.n) = mknode("==", NULL, NULL, NULL); }
+#line 2039 "y.tab.c"
+    break;
+
+  case 54: /* relop: NE  */
+#line 588 "parser.y"
+       { (yyval.n) = mknode("!=", NULL, NULL, NULL); }
+#line 2045 "y.tab.c"
+    break;
+
+
+#line 2049 "y.tab.c"
 
       default: break;
     }
@@ -1867,85 +2238,79 @@ yyreturnlab:
   return yyresult;
 }
 
-#line 227 "parser.y"
+#line 591 "parser.y"
 
-
-
-node* mknode(char* token, node* left, node* mid, node* right) {
-    node* newnode = (node*)malloc(sizeof(node));
-    newnode->token = strdup(token);
-    newnode->left  = left;
-    newnode->mid   = mid;
-    newnode->right = right;
-    return newnode;
-}
-
-void printGraphicalTree(node* root, char* prefix, int isLast) {
-    if (root == NULL) return;
-    printf("%s%s%s\n", prefix, (isLast ? "└── " : "├── "), root->token);
-    char newPrefix[512];
-    sprintf(newPrefix, "%s%s", prefix, (isLast ? "    " : "│   "));
-    node *children[3] = {root->left, root->mid, root->right};
-    int lastIdx = -1;
-    for (int i = 0; i < 3; i++) if (children[i]) lastIdx = i;
-    for (int i = 0; i <= lastIdx; i++)
-        if (children[i]) printGraphicalTree(children[i], newPrefix, i == lastIdx);
-}
-
-void printLMD(node* root) {
-    if (root == NULL) return;
-    printf("%s ", root->token);
-    printLMD(root->left);
-    printLMD(root->mid);
-    printLMD(root->right);
-}
-
-void printRMD(node* root) {
-    if (root == NULL) return;
-    printf("%s ", root->token);
-    printRMD(root->right);
-    printRMD(root->mid);
-    printRMD(root->left);
-}
-
-int main() {
-    printf("PARSING STARTED\n\n");
-    yyparse();
-
-    if (error_count == 0) {
-        printf("\nRESULT: Parsing successful — no syntax errors detected.\n");
-        printf("\nGRAPHICAL SYNTAX TREE:\n\n");
-        printGraphicalTree(final_root, "", 1);
-        printf("\nLEFTMOST DERIVATION:\n");
-        printLMD(final_root);
-        printf("\n\nRIGHTMOST DERIVATION:\n");
-        printRMD(final_root);
-        printf("\n");
-    } else {
-        printf("\nRESULT: Parsing completed with %d syntax error(s) — see errors above.\n", error_count);
-    }
-    return (error_count > 0) ? 1 : 0;
-}
 
 void yyerror(const char *s) {
-    extern int line;
     extern char *yytext;
     error_count++;
 
     if (strcmp(yytext, "") == 0 || strcmp(yytext, "$end") == 0)
-        fprintf(stderr, "Syntax error at line %d: Unexpected end of input — possibly missing ';' or '}'\n", line);
+        fprintf(stderr, "Syntax error at line %d: Unexpected end of input — possibly missing ';' or '}'\n", yylineno);
     else if (strcmp(yytext, ";") == 0)
-        fprintf(stderr, "Syntax error at line %d: Unexpected ';' — ill-formed statement before semicolon\n", line);
+        fprintf(stderr, "Syntax error at line %d: Unexpected ';' — ill-formed statement before semicolon\n", yylineno);
     else if (strcmp(yytext, ")") == 0)
-        fprintf(stderr, "Syntax error at line %d: Unexpected ')' — missing opening '(' or extra ')'\n", line);
+        fprintf(stderr, "Syntax error at line %d: Unexpected ')' — missing opening '(' or extra ')'\n", yylineno);
     else if (strcmp(yytext, "(") == 0)
-        fprintf(stderr, "Syntax error at line %d: Unexpected '(' — missing closing ')' from earlier, or missing ';' before this\n", line);
+        fprintf(stderr, "Syntax error at line %d: Unexpected '(' — missing closing ')' or ';' before this\n", yylineno);
     else if (strcmp(yytext, "}") == 0)
-        fprintf(stderr, "Syntax error at line %d: Unexpected '}' — missing opening '{' or extra '}' in block\n", line);
+        fprintf(stderr, "Syntax error at line %d: Unexpected '}' — missing '{' or extra '}'\n", yylineno);
     else if (strcmp(yytext, "{") == 0)
-        fprintf(stderr, "Syntax error at line %d: Unexpected '{' — missing closing '}' from a previous block, or ';' before this\n", line);
+        fprintf(stderr, "Syntax error at line %d: Unexpected '{' — missing '}' from a previous block or ';'\n", yylineno);
     else if (strcmp(yytext, "=") == 0)
-        fprintf(stderr, "Syntax error at line %d: Unexpected '=' — missing variable name or invalid assignment target\n", line);
+        fprintf(stderr, "Syntax error at line %d: Unexpected '=' — missing variable name or invalid target\n", yylineno);
     else
-        fprintf(stderr, "Syntax error at line %d: Unexpected token '%s'\n", line, yytext);
+        fprintf(stderr, "Syntax error at line %d: Unexpected token '%s'\n", yylineno, yytext);
+}
+
+int main() {
+    /* Build grammar and compute FIRST/FOLLOW before parsing */
+    build_grammar();
+    compute_first();
+    compute_follow();
+
+    printf("PARSING STARTED\n\n");
+    int pos = 0;
+    char line[256];
+    while (fgets(line, sizeof(line), stdin) != NULL) {
+        int len = strlen(line);
+        if (pos + len < (int)sizeof(input_buffer) - 1) {
+            strcpy(input_buffer + pos, line);
+            pos += len;
+        }
+    }
+    input_buffer[pos] = '\0';
+
+    YY_BUFFER_STATE bp = yy_scan_string(input_buffer);
+
+    printf("\nSTACK TRACE TABLE:\n");
+    printf("STACK\t\tINPUT\t\tACTION\n");
+    printf("----------------------------------------\n");
+
+    yyparse();
+
+    if (error_count == 0) {
+        printf("\nRESULT: Parsing successful — no syntax errors detected.\n");
+
+        printf("\nGRAPHICAL SYNTAX TREE:\n\n");
+        printGraphicalTree(root, "", 1);
+        printf("\n");
+
+        printf("\nLEFTMOST DERIVATION:\n");
+        printLMD(root);
+        printf("\n");
+
+        printf("\nRIGHTMOST DERIVATION:\n");
+        printRMD(root);
+        printf("\n");
+    } else {
+        printf("\nRESULT: Parsing completed with %d syntax error(s) — see errors above.\n", error_count);
+    }
+
+    printFirstSets();
+    printFollowSets();
+    printLL1Table();
+
+    yy_delete_buffer(bp);
+    return (error_count > 0) ? 1 : 0;
 }
